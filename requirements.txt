@@ -4,5 +4,4 @@ pyaudio
 pynput
 keyboard
 argparse
-rumps
 numpy

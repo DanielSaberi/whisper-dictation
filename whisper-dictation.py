@@ -3,7 +3,6 @@ import time
 import threading
 import pyaudio
 import numpy as np
-import rumps
 from pynput import keyboard
 from whisper import load_model
 import platform
@@ -92,7 +91,7 @@ class GlobalKeyListener:
         elif key == self.key2:
             self.key2_pressed = False
 
-
+'''
 class StatusBarApp(rumps.App):
     def __init__(self, recorder, languages=None, max_time=None):
         super().__init__("whisper", "⏯")
@@ -168,6 +167,105 @@ class StatusBarApp(rumps.App):
             self.stop_app(None)
         else:
             self.start_app(None)
+'''
+
+import gi
+gi.require_version('Gtk', '3.0')
+gi.require_version('AppIndicator3', '0.1')
+from gi.repository import Gtk, AppIndicator3
+import threading
+import time
+
+class StatusBarApp:
+    def __init__(self, recorder, languages=None, max_time=None):
+        self.app_indicator = AppIndicator3.Indicator.new(
+            "whisper",
+            "media-playback-pause-symbolic",
+            AppIndicator3.IndicatorCategory.SYSTEM_SERVICES
+        )
+        self.app_indicator.set_status(AppIndicator3.IndicatorStatus.ACTIVE)
+        
+        self.languages = languages
+        self.current_language = languages[0] if languages is not None else None
+
+        self.menu = Gtk.Menu()
+
+        # Add Start Recording item
+        start_recording_item = Gtk.MenuItem(label="Start Recording")
+        start_recording_item.connect("activate", self.start_app)
+        self.menu.append(start_recording_item)
+
+        # Add Stop Recording item
+        stop_recording_item = Gtk.MenuItem(label="Stop Recording")
+        stop_recording_item.set_sensitive(False)
+        self.menu.append(stop_recording_item)
+
+        # Separator
+        separator = Gtk.SeparatorMenuItem()
+        self.menu.append(separator)
+
+        # Add languages if available
+        if languages:
+            self.language_items = []
+            for lang in languages:
+                item = Gtk.RadioMenuItem(label=lang, group=self.language_items)
+                item.connect("toggled", self.change_language)
+                if lang == self.current_language:
+                    item.set_active(True)
+                self.menu.append(item)
+                self.language_items.append(item)
+                
+        self.menu.show_all()
+        self.app_indicator.set_menu(self.menu)
+
+        self.started = False
+        self.recorder = recorder
+        self.max_time = max_time
+        self.timer = None
+        self.elapsed_time = 0
+
+    def change_language(self, widget):
+        if widget.get_active():
+            self.current_language = widget.get_label()
+
+    def start_app(self, widget):
+        print('Listening...')
+        self.started = True
+        self.recorder.start(self.current_language)
+
+        if self.max_time is not None:
+            self.timer = threading.Timer(self.max_time, lambda: self.stop_app(None))
+            self.timer.start()
+
+        self.start_time = time.time()
+        self.update_title()
+
+    def stop_app(self, widget):
+        if not self.started:
+            return
+        
+        if self.timer is not None:
+            self.timer.cancel()
+
+        print('Transcribing...')
+        self.app_indicator.set_icon("media-playback-pause-symbolic")
+        self.started = False
+        self.recorder.stop()
+        print('Done.\n')
+
+    def update_title(self):
+        if self.started:
+            self.elapsed_time = int(time.time() - self.start_time)
+            minutes, seconds = divmod(self.elapsed_time, 60)
+            self.app_indicator.set_label(f"{minutes:02d}:{seconds:02d}", "")
+            self.app_indicator.set_icon("media-record")
+            threading.Timer(1, self.update_title).start()
+
+    def toggle(self):
+        if self.started:
+            self.stop_app(None)
+        else:
+            self.start_app(None)
 
 
 def parse_args():
@@ -215,12 +313,12 @@ if __name__ == "__main__":
     
     transcriber = SpeechTranscriber(model)
     recorder = Recorder(transcriber)
-    
+
     app = StatusBarApp(recorder, args.language, args.max_time)
     key_listener = GlobalKeyListener(app, args.key_combination)
     listener = keyboard.Listener(on_press=key_listener.on_key_press, on_release=key_listener.on_key_release)
     listener.start()
 
     print("Running... ")
-    app.run()
+    Gtk.main()  # This will keep the application running
 
